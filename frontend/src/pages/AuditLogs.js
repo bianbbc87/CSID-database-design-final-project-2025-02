@@ -7,6 +7,21 @@ function AuditLogs() {
   const [showModal, setShowModal] = useState(false);
   const [selectedLog, setSelectedLog] = useState(null);
 
+  // Error type 추론 함수
+  const inferErrorType = (log) => {
+    if (!log.is_failed) return null;
+    
+    if (log.error_type) return log.error_type;
+    
+    // 기존 데이터에 대한 fallback 로직
+    const exitCode = log.details?.exit_code;
+    if (exitCode === 255 || exitCode > 128) return 'RESOURCE_ERROR';
+    if (exitCode === 127) return 'SCRIPT_ERROR';
+    if (exitCode === 126) return 'PERMISSION_ERROR';
+    
+    return 'SCRIPT_ERROR'; // 기본값
+  };
+
   const fetchAuditLogs = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/audit-logs`);
@@ -90,8 +105,8 @@ function AuditLogs() {
             <tr>
               <th>Timestamp</th>
               <th>Container Name</th>
-              <th>Entity Type</th>
-              <th>Entity ID</th>
+              <th>Status</th>
+              <th>Error Type</th>
               <th>User</th>
               <th>Details</th>
             </tr>
@@ -99,17 +114,40 @@ function AuditLogs() {
           <tbody>
             {auditLogs.map(log => (
               <tr key={log.audit_id}>
-                <td>{new Date(log.created_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', hour12: false})}</td>
+                <td>{new Date(log.created_at).toLocaleString('ko-KR', {
+                  timeZone: 'Asia/Seoul',
+                  year: 'numeric',
+                  month: '2-digit', 
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false
+                })}</td>
                 <td>{getContainerName(log)}</td>
-                <td>{log.target_type}</td>
-                <td><code>{log.target_id}</code></td>
+                <td>
+                  {log.is_failed ? (
+                    <span className="status-badge failed">FAILED</span>
+                  ) : (
+                    <span className="status-badge success">SUCCESS</span>
+                  )}
+                </td>
+                <td>
+                  {inferErrorType(log) ? (
+                    <span className={`error-type-badge ${inferErrorType(log).toLowerCase()}`}>
+                      {inferErrorType(log)}
+                    </span>
+                  ) : (
+                    <span className="error-type-badge none">-</span>
+                  )}
+                </td>
                 <td>{log.username || 'System'}</td>
                 <td>
                   <button 
                     className="details-btn"
                     onClick={() => openLogModal(log)}
                   >
-                    📋 View Logs
+                    View Logs
                   </button>
                 </td>
               </tr>

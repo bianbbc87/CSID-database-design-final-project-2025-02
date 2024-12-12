@@ -11,8 +11,9 @@ function ExecutionHistory() {
   const [filters, setFilters] = useState({
     search: '',
     status: '',
+    type: '',
     sortBy: 'started_at',
-    sortOrder: 'desc', // Latest first as default
+    sortOrder: 'desc',
     startDate: '',
     endDate: ''
   });
@@ -23,13 +24,7 @@ function ExecutionHistory() {
     try {
       const response = await fetch(`${API_BASE}/api/runs`);
       const data = await response.json();
-      
-      // ISO 문자열로 직접 정렬 (한국어 날짜 파싱 문제 해결)
-      const sortedData = data.sort((a, b) => {
-        return b.started_at.localeCompare(a.started_at); // 문자열 비교로 최신순
-      });
-      
-      setRuns(sortedData);
+      setRuns(data);
     } catch (error) {
       console.error('Error fetching runs:', error);
     }
@@ -72,6 +67,7 @@ function ExecutionHistory() {
     const matchesSearch = run.job_name.toLowerCase().includes(filters.search.toLowerCase()) ||
                          run.user.toLowerCase().includes(filters.search.toLowerCase());
     const matchesStatus = !filters.status || run.status === filters.status;
+    const matchesType = !filters.type || run.run_type === filters.type;
     
     let matchesDate = true;
     if (filters.startDate || filters.endDate) {
@@ -84,10 +80,33 @@ function ExecutionHistory() {
       }
     }
     
-    return matchesSearch && matchesStatus && matchesDate;
+    return matchesSearch && matchesStatus && matchesType && matchesDate;
   }).sort((a, b) => {
-    // ISO 문자열 비교로 최신순 정렬 (한국어 날짜 파싱 문제 해결)
-    return b.started_at.localeCompare(a.started_at);
+    // 정렬 로직
+    let aValue, bValue;
+    
+    if (filters.sortBy === 'started_at') {
+      aValue = new Date(a.started_at);
+      bValue = new Date(b.started_at);
+    } else if (filters.sortBy === 'job_name') {
+      aValue = a.job_name.toLowerCase();
+      bValue = b.job_name.toLowerCase();
+    } else if (filters.sortBy === 'status') {
+      aValue = a.status;
+      bValue = b.status;
+    } else if (filters.sortBy === 'run_type') {
+      aValue = a.run_type;
+      bValue = b.run_type;
+    } else {
+      aValue = a[filters.sortBy];
+      bValue = b[filters.sortBy];
+    }
+    
+    if (filters.sortOrder === 'asc') {
+      return aValue > bValue ? 1 : -1;
+    } else {
+      return aValue < bValue ? 1 : -1;
+    }
   });
 
   const paginatedRuns = filteredRuns.slice(
@@ -124,6 +143,23 @@ function ExecutionHistory() {
           <option value="SUCCESS">Success</option>
           <option value="FAILED">Failed</option>
         </select>
+        <select
+          value={filters.type}
+          onChange={(e) => setFilters({...filters, type: e.target.value})}
+        >
+          <option value="">All Types</option>
+          <option value="MANUAL">Manual</option>
+          <option value="SCHEDULED">Scheduled</option>
+          <option value="MONITORED">Monitored</option>
+          <option value="RETRY">Retry</option>
+        </select>
+        <select
+          value={filters.sortOrder}
+          onChange={(e) => setFilters({...filters, sortOrder: e.target.value})}
+        >
+          <option value="desc">Newest First</option>
+          <option value="asc">Oldest First</option>
+        </select>
         <input
           type="date"
           value={filters.startDate}
@@ -156,14 +192,14 @@ function ExecutionHistory() {
           onClick={() => setCurrentRunsPage(prev => Math.max(prev - 1, 1))}
           disabled={currentRunsPage === 1}
         >
-          ← Previous
+          ←
         </button>
         <span>Page {currentRunsPage} of {Math.ceil(filteredRuns.length / runsPerPage)}</span>
         <button 
           onClick={() => setCurrentRunsPage(prev => Math.min(prev + 1, Math.ceil(filteredRuns.length / runsPerPage)))}
           disabled={currentRunsPage === Math.ceil(filteredRuns.length / runsPerPage)}
         >
-          Next →
+          →
         </button>
       </div>
 

@@ -96,7 +96,7 @@ function Containers() {
 
   return (
     <div className="containers-page">
-      <div className="flex dashboard-stats">
+      <div className="dashboard-stats">
         <div className="stat-card">
           <h3>Total Containers</h3>
           <p>{containers.length}</p>
@@ -123,14 +123,14 @@ function Containers() {
           onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
           disabled={currentPage === 1}
         >
-          ← Previous
+          ←
         </button>
         <span>Page {currentPage} of {Math.ceil(containers.length / containersPerPage)}</span>
         <button 
           onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(containers.length / containersPerPage)))}
           disabled={currentPage === Math.ceil(containers.length / containersPerPage)}
         >
-          Next →
+          →
         </button>
       </div>
       
@@ -144,7 +144,6 @@ function Containers() {
             <p><strong>Type:</strong> {container.type_name}</p>
             <p><strong>Image:</strong> <code>{container.docker_image || 'N/A'}</code></p>
             <p><strong>Owner:</strong> {container.username}</p>
-            {container.description && <p><strong>Description:</strong> {container.description}</p>}
             <div className="job-actions">
               {container.container_status === 'RUNNING' && (
                 <button 

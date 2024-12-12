@@ -34,7 +34,7 @@ def get_active_schedules():
                 SELECT s.schedule_id, s.job_id, s.cron_expression, j.name, j.docker_image
                 FROM JobSchedules s
                 JOIN Jobs j ON s.job_id = j.job_id
-                WHERE s.is_active = TRUE AND j.is_active = TRUE
+                WHERE s.is_active = TRUE
             """)
         ).fetchall()
         return result
@@ -72,39 +72,40 @@ def execute_job(job_id, job_name, docker_image):
             {"run_id": run_id, "job_id": job_id, "started_at": kst_now}
         )
         
-        # Docker 컨테이너 시작
+        # Docker 컨테이너 시작 (동기 실행으로 완료까지 대기)
         if docker_image:
+            container_name = f"scheduled-{job_name}-{int(time.time())}"
             result = subprocess.run(
-                ["docker", "run", "--rm", "--name", f"scheduled-{job_name}-{int(time.time())}", docker_image],
+                ["docker", "run", "--rm", "--name", container_name, docker_image],
                 capture_output=True, text=True
             )
             
-            # 실행 결과 업데이트
-            status = "SUCCESS" if result.returncode == 0 else "FAILED"
+            exit_code = result.returncode
+            print(f"🐳 Container {container_name} completed with exit code: {exit_code}")
+            
+            # 실행 완료 처리
+            status = "SUCCESS" if exit_code == 0 else "FAILED"
             db.execute(
-                text("""
-                    UPDATE JobRuns 
-                    SET status = :status, finished_at = :finished_at, exit_code = :exit_code
-                    WHERE run_id = :run_id
-                """),
-                {
-                    "status": status,
-                    "finished_at": datetime.now(KST),
-                    "exit_code": result.returncode,
-                    "run_id": run_id
-                }
+                text("UPDATE JobRuns SET status = :status, finished_at = :finished_at WHERE run_id = :run_id"),
+                {"status": status, "finished_at": datetime.now(KST), "run_id": run_id}
             )
             
-            # 로그 저장
-            if result.stdout or result.stderr:
-                log_text = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-                db.execute(
-                    text("INSERT INTO JobRunLogs (run_id, log_text) VALUES (:run_id, :log_text)"),
-                    {"run_id": run_id, "log_text": log_text}
-                )
+            # 완료 audit log 생성
+            db.execute(
+                text("""
+                    INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
+                    VALUES ((SELECT user_id FROM Users WHERE username = 'system' LIMIT 1),
+                            'CONTAINER_LOGS', 'job', :job_id, 
+                            JSON_OBJECT('container_name', :container_name, 'status', :status, 'exit_code', :exit_code, 'logs', :logs))
+                """),
+                {"job_id": job_id, "container_name": container_name, "status": status, "exit_code": exit_code, "logs": result.stdout + result.stderr}
+            )
+            
+            print(f"✅ Job {job_name} completed: {status}")
+        else:
+            print(f"⚠️ No docker image specified for {job_name}")
         
         db.commit()
-        print(f"✅ Job {job_name} completed with status: {status}")
         
     except Exception as e:
         print(f"❌ Error executing job {job_name}: {e}")
@@ -123,6 +124,7 @@ def main():
         try:
             schedules = get_active_schedules()
             current_time = datetime.now(KST)
+            print(f"🔍 Checking {len(schedules)} schedules at {current_time.strftime('%H:%M:%S')}")
             
             for schedule in schedules:
                 schedule_id, job_id, cron_expr, job_name, docker_image = schedule

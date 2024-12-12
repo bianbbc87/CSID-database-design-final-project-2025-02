@@ -347,21 +347,54 @@ def get_containers(db: Session = Depends(get_db)):
         """)
     ).fetchall()
     
-    return [
-        {
-            "job_id": row[0],
-            "name": row[1], 
-            "description": row[2],
-            "type_name": row[3],
-            "username": row[4],
-            "is_active": row[5],
-            "created_at": row[6].isoformat() if row[6] else None,
-            "container_status": containers.get(row[1], {}).get("status", "NOT_FOUND"),
-            "container_id": containers.get(row[1], {}).get("container_id", None),
-            "docker_image": containers.get(row[1], {}).get("image", "N/A")
-        }
-        for row in result
-    ]
+    # NOT_FOUND 상태인 Job들을 수집하고 제거
+    jobs_to_remove = []
+    result_list = []
+    
+    for row in result:
+        container_status = containers.get(row[1], {}).get("status", "NOT_FOUND")
+        
+        if container_status == "NOT_FOUND":
+            jobs_to_remove.append(row[0])  # job_id 수집
+        else:
+            result_list.append({
+                "job_id": row[0],
+                "name": row[1], 
+                "description": row[2],
+                "type_name": row[3],
+                "username": row[4],
+                "is_active": row[5],
+                "created_at": row[6].isoformat() if row[6] else None,
+                "container_status": container_status,
+                "container_id": containers.get(row[1], {}).get("container_id", None),
+                "docker_image": containers.get(row[1], {}).get("image", "N/A")
+            })
+    
+    # NOT_FOUND Job들 제거
+    if jobs_to_remove:
+        for job_id in jobs_to_remove:
+            try:
+                # 관련 데이터 순서대로 삭제
+                db.execute(text("DELETE FROM JobRunErrors WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"), {"job_id": job_id})
+                db.execute(text("DELETE FROM JobRunLogs WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"), {"job_id": job_id})
+                db.execute(text("DELETE FROM JobRuns WHERE job_id = :job_id"), {"job_id": job_id})
+                db.execute(text("DELETE FROM JobSchedules WHERE job_id = :job_id"), {"job_id": job_id})
+                db.execute(text("DELETE FROM Jobs WHERE job_id = :job_id"), {"job_id": job_id})
+                
+                # 감사 로그 기록
+                db.execute(text("""
+                    INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, before_value)
+                    VALUES ((SELECT user_id FROM Users WHERE username = 'system' LIMIT 1), 
+                            'AUTO_DELETE', 'job', :job_id, JSON_OBJECT('reason', 'Container not found'))
+                """), {"job_id": job_id})
+                
+                print(f"🗑️ Auto-removed job {job_id} (container not found)")
+            except Exception as e:
+                print(f"❌ Error removing job {job_id}: {e}")
+        
+        db.commit()
+    
+    return result_list
 
 @app.get("/api/containers/{job_id}/latest-run")
 def get_latest_run(job_id: str, db: Session = Depends(get_db)):
@@ -400,7 +433,6 @@ def get_jobs(db: Session = Depends(get_db)):
             FROM Jobs j
             JOIN JobTypes jt ON j.type_id = jt.type_id
             LEFT JOIN Users u ON j.owner_id = u.user_id
-            WHERE j.is_active = TRUE
             ORDER BY j.created_at DESC
         """)
     ).fetchall()
@@ -490,17 +522,6 @@ def start_container(job_id: str, db: Session = Depends(get_db)):
             {"run_id": run_id, "job_id": job_id, "started_at": kst_now}
         )
         
-        # Audit 로그 추가
-        db.execute(
-            text("""
-                INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
-                VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
-                        'CONTAINER_START', 'job', :job_id, 
-                        JSON_OBJECT('container_name', :container_name, 'action', 'start'))
-            """),
-            {"job_id": job_id, "container_name": container_name}
-        )
-        
         db.commit()
         
         return {"message": f"Container {container_name} started", "success": True}
@@ -523,7 +544,7 @@ def save_container_logs_to_audit(container_name: str, job_id: str, db: Session):
             db.execute(
                 text("""
                     INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
-                    VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
+                    VALUES ((SELECT user_id FROM Users WHERE username = 'system' LIMIT 1),
                             'CONTAINER_LOGS', 'job', :job_id, 
                             JSON_OBJECT('container_name', :container_name, 'logs', :logs))
                 """),
@@ -553,41 +574,33 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
         
         job_name = job_result[0]
         
-        # 1. JobRunErrors 삭제 (JobRuns 참조)
-        db.execute(
-            text("DELETE FROM JobRunErrors WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"),
-            {"job_id": job_id}
-        )
+        # 1. 스케줄러로 생성된 컨테이너들 강제 종료 및 제거
+        try:
+            import subprocess
+            # scheduled-{job_name}-* 패턴의 컨테이너들 찾기
+            result = subprocess.run(
+                ["docker", "ps", "-a", "--filter", f"name=scheduled-{job_name}", "--format", "{{.Names}}"],
+                capture_output=True, text=True
+            )
+            
+            if result.stdout.strip():
+                container_names = result.stdout.strip().split('\n')
+                for container_name in container_names:
+                    if container_name:
+                        # 컨테이너 강제 종료 및 제거
+                        subprocess.run(["docker", "stop", container_name], capture_output=True)
+                        subprocess.run(["docker", "rm", container_name], capture_output=True)
+                        print(f"🗑️ Removed scheduled container: {container_name}")
+        except Exception as e:
+            print(f"⚠️ Error cleaning up scheduled containers: {e}")
         
-        # 2. JobRunLogs 삭제 (JobRuns 참조)
-        db.execute(
-            text("DELETE FROM JobRunLogs WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"),
-            {"job_id": job_id}
-        )
+        # 2. 데이터베이스에서 관련 데이터 삭제 (기존 순서 유지)
+        db.execute(text("DELETE FROM JobRunErrors WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"), {"job_id": job_id})
+        db.execute(text("DELETE FROM JobRunLogs WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"), {"job_id": job_id})
+        db.execute(text("DELETE FROM JobRuns WHERE job_id = :job_id"), {"job_id": job_id})
+        db.execute(text("DELETE FROM JobSchedules WHERE job_id = :job_id"), {"job_id": job_id})
         
-        # 3. JobRuns 삭제
-        db.execute(
-            text("DELETE FROM JobRuns WHERE job_id = :job_id"),
-            {"job_id": job_id}
-        )
-        
-        # 4. JobSchedules 삭제
-        db.execute(
-            text("DELETE FROM JobSchedules WHERE job_id = :job_id"),
-            {"job_id": job_id}
-        )
-        
-        # 5. 감사 로그 기록
-        db.execute(
-            text("""
-            INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, before_value)
-            VALUES ((SELECT user_id FROM Users WHERE username = 'system' LIMIT 1), 
-                    'DELETE', 'job', :job_id, JSON_OBJECT('job_name', :job_name))
-            """),
-            {"job_id": job_id, "job_name": job_name}
-        )
-        
-        # 6. Jobs 삭제
+        # 3. Job 삭제
         result = db.execute(
             text("DELETE FROM Jobs WHERE job_id = :job_id"),
             {"job_id": job_id}
@@ -597,7 +610,7 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Job not found")
         
         db.commit()
-        return {"message": f"Job '{job_name}' and all related data deleted successfully"}
+        return {"message": f"Job '{job_name}' and all related data (including scheduled containers) deleted successfully"}
         
     except Exception as e:
         db.rollback()
@@ -641,17 +654,6 @@ def stop_container(job_id: str, db: Session = Depends(get_db)):
                 ORDER BY started_at DESC LIMIT 1
             """),
             {"job_id": job_id, "finished_at": kst_now}
-        )
-        
-        # Audit 로그 추가
-        db.execute(
-            text("""
-                INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
-                VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
-                        'CONTAINER_STOP', 'job', :job_id, 
-                        JSON_OBJECT('container_name', :container_name, 'action', 'stop'))
-            """),
-            {"job_id": job_id, "container_name": container_name}
         )
         
         db.commit()
@@ -847,7 +849,9 @@ def get_audit_logs(limit: int = 50, db: Session = Depends(get_db)):
             "target_type": row[3],
             "target_id": row[4],
             "details": json.loads(row[5]) if row[5] else {},
-            "created_at": row[6].isoformat() if row[6] else None
+            "created_at": row[6].replace(tzinfo=pytz.UTC).astimezone(KST).isoformat() if row[6] else None,
+            "is_failed": json.loads(row[5]).get("status") == "FAILED" if row[5] and json.loads(row[5]).get("status") else False,
+            "error_type": json.loads(row[5]).get("error_type") if row[5] and json.loads(row[5]).get("error_type") else None
         }
         for row in result
     ]
@@ -1092,6 +1096,54 @@ def run_job_manually(job_id: str, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+class JobRunError(BaseModel):
+    run_id: str
+    error_type: str
+    message: str
+    logs: Optional[str] = None
+
+@app.post("/api/job-run-errors")
+def create_job_run_error(error: JobRunError, db: Session = Depends(get_db)):
+    """Job 실행 오류 기록"""
+    try:
+        # ErrorType 확인
+        error_type_result = db.execute(
+            text("SELECT error_type_id FROM ErrorTypes WHERE name = :error_type"),
+            {"error_type": error.error_type}
+        ).fetchone()
+        
+        if error_type_result:
+            error_type_id = error_type_result[0]
+        else:
+            # 새로운 오류 유형 생성
+            error_type_id = str(uuid.uuid4())
+            db.execute(
+                text("INSERT INTO ErrorTypes (error_type_id, name) VALUES (:id, :name)"),
+                {"id": error_type_id, "name": error.error_type}
+            )
+        
+        # JobRunError 생성
+        db.execute(
+            text("""
+                INSERT INTO JobRunErrors (error_id, run_id, error_type_id, message, stacktrace)
+                VALUES (:error_id, :run_id, :error_type_id, :message, :stacktrace)
+            """),
+            {
+                "error_id": str(uuid.uuid4()),
+                "run_id": error.run_id,
+                "error_type_id": error_type_id,
+                "message": error.message,
+                "stacktrace": error.logs
+            }
+        )
+        
+        db.commit()
+        return {"message": "Error recorded successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/test")
 def test_auto_reload():
     return {"message": "Auto-reload is working!", "timestamp": "2025-12-12 19:15:30"}
@@ -1099,3 +1151,90 @@ def test_auto_reload():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/api/users")
+def get_users(db: Session = Depends(get_db)):
+    """DB에 저장된 사용자 목록 조회"""
+    try:
+        result = db.execute(text("""
+            SELECT user_id, username, email, created_at 
+            FROM Users 
+            ORDER BY created_at DESC
+        """)).fetchall()
+        
+        users = []
+        for row in result:
+            users.append({
+                'user_id': row[0],
+                'username': row[1], 
+                'email': row[2],
+                'created_at': row[3].isoformat() if row[3] else None
+            })
+        
+        return users
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get users: {str(e)}")
+
+@app.get("/api/system-users")
+def get_system_users():
+    """시스템 사용자 목록 조회"""
+    try:
+        import subprocess
+        # macOS에서 사용자 목록 조회
+        result = subprocess.run(['dscl', '.', 'list', '/Users'], capture_output=True, text=True)
+        users = []
+        
+        for username in result.stdout.strip().split('\n'):
+            if username and not username.startswith('_') and username not in ['daemon', 'nobody', 'root']:
+                try:
+                    uid_result = subprocess.run(['id', '-u', username], capture_output=True, text=True)
+                    if uid_result.returncode == 0:
+                        uid = int(uid_result.stdout.strip())
+                        if uid >= 500:  # macOS 일반 사용자
+                            users.append({
+                                'username': username,
+                                'uid': uid,
+                                'gid': 0,
+                                'home_dir': f'/Users/{username}',
+                                'shell': '/bin/bash'
+                            })
+                except:
+                    continue
+        
+        return users
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get system users: {str(e)}")
+
+@app.post("/api/users/sync")
+def sync_users_from_system(db: Session = Depends(get_db)):
+    """시스템 사용자를 DB에 동기화"""
+    try:
+        # 시스템 사용자 조회
+        system_users = get_system_users()
+        synced_count = 0
+        
+        for user in system_users:
+            # DB에 이미 존재하는지 확인
+            existing = db.execute(
+                text("SELECT user_id FROM Users WHERE username = :username"),
+                {"username": user['username']}
+            ).fetchone()
+            
+            if not existing:
+                # 새 사용자 추가
+                user_id = str(uuid.uuid4())
+                db.execute(text("""
+                    INSERT INTO Users (user_id, username, email, role, created_at)
+                    VALUES (:user_id, :username, :email, 'developer', NOW())
+                """), {
+                    "user_id": user_id,
+                    "username": user['username'],
+                    "email": f"{user['username']}@localhost"
+                })
+                synced_count += 1
+        
+        db.commit()
+        return {"message": f"Synced {synced_count} new users from system", "total_system_users": len(system_users)}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")

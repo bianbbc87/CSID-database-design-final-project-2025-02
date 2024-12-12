@@ -6,6 +6,7 @@ import Containers from './pages/Containers';
 import ExecutionHistory from './pages/ExecutionHistory';
 import Schedules from './pages/Schedules';
 import AuditLogs from './pages/AuditLogs';
+import Users from './pages/Users';
 
 function Navigation() {
   const location = useLocation();
@@ -38,6 +39,12 @@ function Navigation() {
       >
         📋 Audit Logs
       </Link>
+      <Link 
+        to="/users" 
+        className={isActive('/users') ? 'nav-link active' : 'nav-link'}
+      >
+        사용자 관리
+      </Link>
     </nav>
   );
 }
@@ -58,6 +65,7 @@ function App() {
             <Route path="/execution-history" element={<ExecutionHistory />} />
             <Route path="/schedules" element={<Schedules />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
+            <Route path="/users" element={<Users />} />
           </Routes>
         </main>
       </div>

@@ -208,13 +208,13 @@ function Schedules() {
                     className={`toggle-btn ${schedule.is_active ? 'deactivate' : 'activate'}`}
                     onClick={() => toggleSchedule(schedule.schedule_id, schedule.is_active)}
                   >
-                    {schedule.is_active ? '⏸️ Deactivate' : '▶️ Activate'}
+                    {schedule.is_active ? 'Deactivate' : 'Activate'}
                   </button>
                   <button 
                     className="delete-btn"
                     onClick={() => deleteSchedule(schedule.schedule_id)}
                   >
-                    🗑️ Delete
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -224,13 +224,14 @@ function Schedules() {
       </div>
 
       {showScheduleModal && (
-        <div className="modal-overlay" onClick={() => setShowScheduleModal(false)}>
+        <div className="modal-overlay schedule-modal" onClick={() => setShowScheduleModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Create New Schedule</h3>
               <button onClick={() => setShowScheduleModal(false)}>✕</button>
             </div>
-            <form onSubmit={createSchedule}>
+            <div className="modal-body">
+              <form onSubmit={createSchedule}>
               <div className="form-group">
                 <label>Job:</label>
                 <select
@@ -357,13 +358,14 @@ function Schedules() {
                 </div>
               )}
 
-              <div className="form-actions">
-                <button type="button" onClick={() => setShowScheduleModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit">Create Schedule</button>
-              </div>
-            </form>
+                <div className="form-actions">
+                  <button type="button" onClick={() => setShowScheduleModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit">Create Schedule</button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
