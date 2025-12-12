@@ -501,6 +501,35 @@ def start_container(job_id: str, db: Session = Depends(get_db)):
         db.rollback()
         return {"error": f"Error: {str(e)}", "success": False}
 
+def save_container_logs_to_audit(container_name: str, job_id: str, db: Session):
+    """컨테이너 로그를 audit logs에 저장"""
+    try:
+        import subprocess
+        
+        # 컨테이너 로그 가져오기 (tail 500)
+        logs_cmd = ["docker", "logs", "--tail=500", container_name]
+        result = subprocess.run(logs_cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            # Audit 로그에 컨테이너 로그 저장
+            db.execute(
+                text("""
+                    INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
+                    VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
+                            'CONTAINER_LOGS', 'job', :job_id, 
+                            JSON_OBJECT('container_name', :container_name, 'logs', :logs))
+                """),
+                {
+                    "job_id": job_id, 
+                    "container_name": container_name,
+                    "logs": result.stdout[:10000]  # 로그 크기 제한 (10KB)
+                }
+            )
+            print(f"Container logs saved to audit for {container_name}")
+        
+    except Exception as e:
+        print(f"Failed to save container logs: {e}")
+
 @app.post("/api/containers/{job_id}/stop")
 def stop_container(job_id: str, db: Session = Depends(get_db)):
     """컨테이너 정지"""
@@ -525,6 +554,9 @@ def stop_container(job_id: str, db: Session = Depends(get_db)):
         
         if stop_result.returncode != 0:
             return {"error": f"Failed to stop: {stop_result.stderr.strip()}", "success": False}
+        
+        # 컨테이너 로그를 audit logs에 저장 (tail 500)
+        save_container_logs_to_audit(container_name, job_id, db)
         
         # 기존 RUNNING 세션을 SUCCESS로 완료 처리 (수동 정지)
         kst_now = datetime.now(KST)

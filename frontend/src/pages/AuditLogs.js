@@ -4,6 +4,8 @@ const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:
 
 function AuditLogs() {
   const [auditLogs, setAuditLogs] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedLog, setSelectedLog] = useState(null);
 
   const fetchAuditLogs = async () => {
     try {
@@ -13,6 +15,25 @@ function AuditLogs() {
     } catch (error) {
       console.error('Error fetching audit logs:', error);
     }
+  };
+
+  const getContainerName = (afterValue) => {
+    try {
+      const parsed = typeof afterValue === 'string' ? JSON.parse(afterValue) : afterValue;
+      return parsed?.container_name || 'N/A';
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const openLogModal = (log) => {
+    setSelectedLog(log);
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedLog(null);
   };
 
   const getActionBadgeClass = (action) => {
@@ -57,7 +78,7 @@ function AuditLogs() {
           <thead>
             <tr>
               <th>Timestamp</th>
-              <th>Action</th>
+              <th>Container Name</th>
               <th>Entity Type</th>
               <th>Entity ID</th>
               <th>User</th>
@@ -67,28 +88,50 @@ function AuditLogs() {
           <tbody>
             {auditLogs.map(log => (
               <tr key={log.audit_id}>
-                <td>{new Date(log.created_at).toLocaleString()}</td>
-                <td>
-                  <span className={`action-badge ${getActionBadgeClass(log.action_type)}`}>
-                    {log.action_type}
-                  </span>
-                </td>
+                <td>{new Date(log.created_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', hour12: false})}</td>
+                <td>{getContainerName(log.after_value)}</td>
                 <td>{log.target_type}</td>
                 <td><code>{log.target_id}</code></td>
                 <td>{log.username || 'System'}</td>
                 <td>
-                  {log.details && (
-                    <details>
-                      <summary>View Details</summary>
-                      <pre>{formatJsonValue(log.details)}</pre>
-                    </details>
-                  )}
+                  <button 
+                    className="details-btn"
+                    onClick={() => openLogModal(log)}
+                  >
+                    📋 View Logs
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* 로그 모달 */}
+      {showModal && selectedLog && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Container Logs - {getContainerName(selectedLog.after_value)}</h3>
+              <button className="close-btn" onClick={closeModal}>✕</button>
+            </div>
+            <div className="modal-body">
+              <pre className="log-text">
+                {(() => {
+                  try {
+                    const parsed = typeof selectedLog.after_value === 'string' 
+                      ? JSON.parse(selectedLog.after_value) 
+                      : selectedLog.after_value;
+                    return parsed?.logs || 'No logs available';
+                  } catch {
+                    return 'Error parsing logs';
+                  }
+                })()}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
