@@ -166,6 +166,4 @@ INSERT INTO ErrorTypes (name, description) VALUES
 
 -- 테스트 사용자 생성
 INSERT INTO Users (username, email, role) VALUES 
-('admin', 'admin@company.com', 'admin'),
-('alice', 'alice@company.com', 'developer'),
-('bob', 'bob@company.com', 'viewer');
+('admin', 'admin@company.com', 'admin');

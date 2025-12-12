@@ -117,8 +117,18 @@ def analyze_error_type(logs, exit_code):
     # 기본값: 스크립트 오류
     return 'SCRIPT_ERROR'
 
+# 전역 변수로 처리된 컨테이너 추적
+processed_containers = set()
+
 def register_container_execution(container):
     """컨테이너 실행을 시스템에 등록"""
+    global processed_containers
+    
+    # 로컬 중복 체크 (빠른 필터링)
+    container_key = f"{container['name']}-{container['container_id']}"
+    if container_key in processed_containers:
+        return
+    
     try:
         # 컨테이너가 종료된 경우만 기록 (완료된 실행)
         if not container['status'].startswith('Exited'):
@@ -126,14 +136,16 @@ def register_container_execution(container):
             
         print(f"🔍 Processing container: {container['name']} - {container['status']}")
         
-        # 이미 등록된 컨테이너인지 확인 (컨테이너 ID 기준)
+        # 이미 등록된 컨테이너인지 확인 (더 정확한 중복 체크)
         check_response = requests.get(f"{API_BASE}/api/runs", timeout=10)
         if check_response.status_code == 200:
             existing_runs = check_response.json()
             for run in existing_runs:
-                # 컨테이너 ID로 중복 체크 (더 정확함)
+                # 컨테이너 이름 + ID + 완료 상태로 정확한 중복 체크
                 if (run.get('job_name') == container['name'] and 
-                    run.get('container_id') == container['container_id']):
+                    run.get('container_id') == container['container_id'] and
+                    run.get('status') in ['SUCCESS', 'FAILED']):
+                    print(f"⏭️ Container {container['name']} (ID: {container['container_id'][:12]}) already processed")
                     return
             
         # 컨테이너 실행 사용자 감지 (현재 로그인한 사용자)
@@ -268,7 +280,7 @@ def main():
             # 모든 종료된 컨테이너 처리
             for container in containers:
                 if container['status'].startswith('Exited'):
-                    container_key = f"{container['name']}-{container['status']}"
+                    container_key = f"{container['name']}-{container['id']}"
                     if container_key not in processed_containers:
                         register_container_execution(container)
                         processed_containers.add(container_key)
@@ -332,7 +344,6 @@ def main():
             print("\n🛑 Container Monitor stopped")
             break
         except Exception as e:
-            print(f"❌ Monitor error: {e}")
             time.sleep(60)
 
 if __name__ == "__main__":
