@@ -1,0 +1,9 @@
+# 환경 변수
+venv
+
+# python bytecode
+*/__pycache__/
+*/*/__pycache__/
+
+# node_modules
+frontend/node_modules/

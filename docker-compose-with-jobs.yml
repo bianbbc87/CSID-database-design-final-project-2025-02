@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  # 기본 인프라
+  mysql:
+    image: mysql:8.0
+    container_name: job_management_db
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: job_management
+    ports:
+      - "3340:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    command: --default-authentication-plugin=mysql_native_password
+
+  backend:
+    build: ./backend
+    container_name: job_management_api
+    user: root
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+    environment:
+      DATABASE_URL: mysql+pymysql://root:password@mysql/job_management
+    volumes:
+      - ./backend:/app  # 백엔드 코드 실시간 반영
+      - ./examples:/app/examples
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker 소켓 마운트
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload  # 자동 재시작
+
+  frontend:
+    build: ./frontend
+    container_name: job_management_ui
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src  # 프론트엔드 소스 실시간 반영
+      - ./frontend/public:/app/public
+    environment:
+      - CHOKIDAR_USEPOLLING=true  # 파일 변경 감지 개선
+
+  # 컨테이너 모니터링 서비스
+  container_monitor:
+    build: ./backend
+    container_name: job_container_monitor
+    depends_on:
+      - backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./job_tracker:/app/job_tracker
+    environment:
+      JOB_TRACKER_API_URL: http://backend:8000
+    command: >
+      sh -c "
+      pip install requests docker &&
+      export PYTHONPATH=/app:$PYTHONPATH &&
+      python -c 'import sys; sys.path.append(\"/app\"); from job_tracker import start_container_monitoring; monitor = start_container_monitoring(\"http://backend:8000\"); import time; [time.sleep(10) for _ in iter(int, 1)]'
+      "
+
+  # 예시 Job 컨테이너들 (자동으로 감지됨)
+  job-daily-etl:
+    image: python:3.9
+    container_name: job-daily-etl
+    labels:
+      job.name: "daily-etl"
+      job.type: "ETL"
+      job.user: "data-team"
+      job.description: "Daily ETL processing job"
+    volumes:
+      - ./examples:/app/examples
+      - ./job_tracker:/app/job_tracker
+    working_dir: /app/examples
+    environment:
+      JOB_USER: "data-team"
+      JOB_TYPE: "ETL"
+    command: python docker_job_example.py
+    profiles: ["jobs"]  # docker-compose --profile jobs up으로 실행
+
+  job-backup:
+    image: python:3.9
+    container_name: job-backup-db
+    labels:
+      job.name: "database-backup"
+      job.type: "BACKUP"
+      job.user: "ops-team"
+      job.description: "Database backup job"
+    volumes:
+      - ./examples:/app/examples
+      - ./job_tracker:/app/job_tracker
+    working_dir: /app/examples
+    environment:
+      JOB_USER: "ops-team"
+      JOB_TYPE: "BACKUP"
+      JOB_TRACKER_API_URL: "http://backend:8000"
+    command: >
+      sh -c "
+      pip install pandas requests docker &&
+      export PYTHONPATH=/app:$PYTHONPATH &&
+      python existing_job_with_tracker.py backup
+      "
+    profiles: ["jobs"]
+
+  job-cleanup:
+    image: python:3.9
+    container_name: job-log-cleanup
+    labels:
+      job.name: "log-cleanup"
+      job.type: "CLEANUP"
+      job.user: "system"
+      job.description: "Old log files cleanup"
+    volumes:
+      - ./examples:/app/examples
+      - ./job_tracker:/app/job_tracker
+    working_dir: /app/examples
+    environment:
+      JOB_USER: "system"
+      JOB_TYPE: "CLEANUP"
+      JOB_TRACKER_API_URL: "http://backend:8000"
+    command: >
+      sh -c "
+      pip install pandas requests docker &&
+      export PYTHONPATH=/app:$PYTHONPATH &&
+      python existing_job_with_tracker.py cleanup
+      "
+    profiles: ["jobs"]
+
+volumes:
+  mysql_data:
