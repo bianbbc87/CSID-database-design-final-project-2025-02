@@ -114,7 +114,7 @@ function Containers() {
       <div className="section-header">
         <h2>Container Management</h2>
         <button className="refresh-btn" onClick={fetchContainers}>
-          🔄 Refresh
+          Refresh
         </button>
       </div>
       

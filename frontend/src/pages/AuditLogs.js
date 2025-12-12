@@ -95,7 +95,7 @@ function AuditLogs() {
       <div className="section-header">
         <h2>Audit Logs</h2>
         <button className="refresh-btn" onClick={fetchAuditLogs}>
-          🔄 Refresh
+          Refresh
         </button>
       </div>
 

@@ -70,7 +70,7 @@ function AdminDashboard() {
   return (
     <div className="admin-dashboard">
       <header className="dashboard-header">
-        <h1>🚀 Job Management System</h1>
+        <h1>Job Management System</h1>
         <div className="header-stats">
           <span className="live-indicator">🟢 Live</span>
           <span className="last-update">Last update: {new Date().toLocaleTimeString()}</span>

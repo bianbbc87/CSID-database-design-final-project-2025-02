@@ -19,25 +19,25 @@ function Navigation() {
         to="/containers" 
         className={isActive('/containers') ? 'nav-link active' : 'nav-link'}
       >
-        🐳 Containers
+        컨테이너 조회
       </Link>
       <Link 
         to="/execution-history" 
         className={isActive('/execution-history') ? 'nav-link active' : 'nav-link'}
       >
-        📊 Execution History
+        실행 & 종료 기록
       </Link>
       <Link 
         to="/schedules" 
         className={isActive('/schedules') ? 'nav-link active' : 'nav-link'}
       >
-        ⏰ Schedules
+        Cron 스케쥴
       </Link>
       <Link 
         to="/audit-logs" 
         className={isActive('/audit-logs') ? 'nav-link active' : 'nav-link'}
       >
-        📋 Audit Logs
+        종료 로그 저장소
       </Link>
       <Link 
         to="/users" 
@@ -54,7 +54,7 @@ function App() {
     <Router>
       <div className="App">
         <header className="App-header">
-          <h1>🚀 Job Management System</h1>
+          <h1>Job Management System</h1>
           <Navigation />
         </header>
 

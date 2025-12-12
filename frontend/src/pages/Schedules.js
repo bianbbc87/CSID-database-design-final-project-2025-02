@@ -25,9 +25,9 @@ function Schedules() {
       case 'seconds':
         return `*/${simple.value} * * * * *`; // 매 N초
       case 'minutes':
-        return `0 */${simple.value} * * *`; // 매 N분
+        return `*/${simple.value} * * * *`; // 매 N분 (분 필드에 */N)
       case 'hours':
-        return `0 0 */${simple.value} * *`; // 매 N시간
+        return `0 */${simple.value} * * *`; // 매 N시간
       case 'daily':
         return `${simple.minute} ${simple.hour} * * *`; // 매일 특정 시간
       case 'weekly':
@@ -168,7 +168,7 @@ function Schedules() {
       <div className="section-header">
         <h2>Job Schedules</h2>
         <button className="add-schedule-btn" onClick={() => setShowScheduleModal(true)}>
-          ➕ Add Schedule
+          Add Schedule
         </button>
       </div>
 

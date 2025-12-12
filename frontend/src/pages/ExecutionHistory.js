@@ -123,7 +123,7 @@ function ExecutionHistory() {
       <div className="section-header">
         <h2>Execution History</h2>
         <button className="refresh-btn" onClick={fetchRuns}>
-          🔄 Refresh
+          Refresh
         </button>
       </div>
 
@@ -172,19 +172,6 @@ function ExecutionHistory() {
           onChange={(e) => setFilters({...filters, endDate: e.target.value})}
           placeholder="End Date"
         />
-        <select
-          value={`${filters.sortBy}-${filters.sortOrder}`}
-          onChange={(e) => {
-            const [sortBy, sortOrder] = e.target.value.split('-');
-            setFilters({...filters, sortBy, sortOrder});
-          }}
-        >
-          <option value="started_at-desc">🕒 Latest (Newest First)</option>
-          <option value="started_at-asc">🕒 Oldest First</option>
-          <option value="job_name-asc">📝 Job Name A-Z</option>
-          <option value="job_name-desc">📝 Job Name Z-A</option>
-          <option value="status-asc">📊 Status A-Z</option>
-        </select>
       </div>
 
       <div className="pagination">
@@ -259,7 +246,7 @@ function ExecutionHistory() {
                 />
               </label>
               <button onClick={() => fetchContainerLogs(selectedContainer)}>
-                🔄 Refresh Logs
+                Refresh Logs
               </button>
             </div>
             <div className="logs-container">
