@@ -12,7 +12,7 @@ function ExecutionHistory() {
     search: '',
     status: '',
     sortBy: 'started_at',
-    sortOrder: 'desc',
+    sortOrder: 'desc', // Latest first as default
     startDate: '',
     endDate: ''
   });
@@ -23,7 +23,13 @@ function ExecutionHistory() {
     try {
       const response = await fetch(`${API_BASE}/api/runs`);
       const data = await response.json();
-      setRuns(data);
+      
+      // ISO 문자열로 직접 정렬 (한국어 날짜 파싱 문제 해결)
+      const sortedData = data.sort((a, b) => {
+        return b.started_at.localeCompare(a.started_at); // 문자열 비교로 최신순
+      });
+      
+      setRuns(sortedData);
     } catch (error) {
       console.error('Error fetching runs:', error);
     }
@@ -80,14 +86,8 @@ function ExecutionHistory() {
     
     return matchesSearch && matchesStatus && matchesDate;
   }).sort((a, b) => {
-    const aVal = a[filters.sortBy];
-    const bVal = b[filters.sortBy];
-    const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
-    
-    if (filters.sortBy === 'started_at') {
-      return multiplier * (new Date(aVal) - new Date(bVal));
-    }
-    return multiplier * aVal.localeCompare(bVal);
+    // ISO 문자열 비교로 최신순 정렬 (한국어 날짜 파싱 문제 해결)
+    return b.started_at.localeCompare(a.started_at);
   });
 
   const paginatedRuns = filteredRuns.slice(
@@ -143,10 +143,11 @@ function ExecutionHistory() {
             setFilters({...filters, sortBy, sortOrder});
           }}
         >
-          <option value="started_at-desc">Latest First</option>
-          <option value="started_at-asc">Oldest First</option>
-          <option value="job_name-asc">Job Name A-Z</option>
-          <option value="job_name-desc">Job Name Z-A</option>
+          <option value="started_at-desc">🕒 Latest (Newest First)</option>
+          <option value="started_at-asc">🕒 Oldest First</option>
+          <option value="job_name-asc">📝 Job Name A-Z</option>
+          <option value="job_name-desc">📝 Job Name Z-A</option>
+          <option value="status-asc">📊 Status A-Z</option>
         </select>
       </div>
 
@@ -189,8 +190,8 @@ function ExecutionHistory() {
                     {run.status || 'UNKNOWN'}
                   </span>
                 </td>
-                <td>{run.started_at ? new Date(run.started_at).toLocaleString() : 'N/A'}</td>
-                <td>{run.finished_at ? new Date(run.finished_at).toLocaleString() : 'Running...'}</td>
+                <td>{run.started_at ? new Date(run.started_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', hour12: false}) : 'N/A'}</td>
+                <td>{run.finished_at ? new Date(run.finished_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', hour12: false}) : 'Running...'}</td>
                 <td>{run.exit_code !== null ? run.exit_code : 'N/A'}</td>
                 <td>{run.user || 'System'}</td>
                 <td>

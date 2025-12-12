@@ -6,8 +6,12 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime
+import pytz
 import json
 import os
+
+# 한국 시간대 설정
+KST = pytz.timezone('Asia/Seoul')
 
 app = FastAPI(title="Job Management System - Auto Tracking")
 
@@ -454,18 +458,41 @@ def start_container(job_id: str, db: Session = Depends(get_db)):
         if start_result.returncode != 0:
             return {"error": f"Failed to start: {start_result.stderr.strip()}", "success": False}
         
-        # JobRuns에 실행 기록 추가
+        # 기존 RUNNING 상태가 있다면 CANCELLED로 변경 (중복 방지)
+        kst_now = datetime.now(KST)
+        db.execute(
+            text("""
+                UPDATE JobRuns 
+                SET status = 'CANCELLED', finished_at = :finished_at
+                WHERE job_id = :job_id AND status = 'RUNNING'
+            """),
+            {"job_id": job_id, "finished_at": kst_now}
+        )
+        
+        # JobRuns에 새 세션 시작 기록 (RUNNING 상태)
         run_id = str(uuid.uuid4())
         db.execute(
             text("""
                 INSERT INTO JobRuns (run_id, job_id, run_type_id, triggered_by_user_id, status, started_at)
                 VALUES (:run_id, :job_id, 
                         (SELECT run_type_id FROM RunTypes WHERE name = 'MANUAL' LIMIT 1),
-                        (SELECT user_id FROM Users WHERE username = 'eunji' LIMIT 1),
-                        'RUNNING', NOW())
+                        (SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
+                        'RUNNING', :started_at)
             """),
-            {"run_id": run_id, "job_id": job_id}
+            {"run_id": run_id, "job_id": job_id, "started_at": kst_now}
         )
+        
+        # Audit 로그 추가
+        db.execute(
+            text("""
+                INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
+                VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
+                        'CONTAINER_START', 'job', :job_id, 
+                        JSON_OBJECT('container_name', :container_name, 'action', 'start'))
+            """),
+            {"job_id": job_id, "container_name": container_name}
+        )
+        
         db.commit()
         
         return {"message": f"Container {container_name} started", "success": True}
@@ -499,16 +526,29 @@ def stop_container(job_id: str, db: Session = Depends(get_db)):
         if stop_result.returncode != 0:
             return {"error": f"Failed to stop: {stop_result.stderr.strip()}", "success": False}
         
-        # 최근 RUNNING 상태인 JobRun을 STOPPED로 업데이트
+        # 기존 RUNNING 세션을 SUCCESS로 완료 처리 (수동 정지)
+        kst_now = datetime.now(KST)
         db.execute(
             text("""
                 UPDATE JobRuns 
-                SET status = 'CANCELLED', finished_at = NOW(), exit_code = 0
+                SET status = 'SUCCESS', finished_at = :finished_at, exit_code = 0
                 WHERE job_id = :job_id AND status = 'RUNNING'
                 ORDER BY started_at DESC LIMIT 1
             """),
-            {"job_id": job_id}
+            {"job_id": job_id, "finished_at": kst_now}
         )
+        
+        # Audit 로그 추가
+        db.execute(
+            text("""
+                INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
+                VALUES ((SELECT user_id FROM Users WHERE username = 'admin' LIMIT 1),
+                        'CONTAINER_STOP', 'job', :job_id, 
+                        JSON_OBJECT('container_name', :container_name, 'action', 'stop'))
+            """),
+            {"job_id": job_id, "container_name": container_name}
+        )
+        
         db.commit()
         
         return {"message": f"Container {container_name} stopped", "success": True}
@@ -552,7 +592,6 @@ def get_job_runs(limit: int = 50, db: Session = Depends(get_db)):
             LEFT JOIN Users u ON jr.triggered_by_user_id = u.user_id
             LEFT JOIN Agents a ON jr.agent_id = a.agent_id
             LEFT JOIN RunTypes rt ON jr.run_type_id = rt.run_type_id
-            ORDER BY jr.started_at DESC
             LIMIT :limit
         """),
         {"limit": limit}
