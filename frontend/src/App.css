@@ -137,6 +137,68 @@
   background-color: #1976D2;
 }
 
+/* Schedule UI Styles */
+.schedule-type-tabs {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.tab:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.tab:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+.tab.active {
+  background: #2196F3;
+  color: white;
+  border-color: #2196F3;
+}
+
+.simple-schedule {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.time-picker {
+  display: flex;
+  gap: 15px;
+}
+
+.time-picker .form-group {
+  flex: 1;
+}
+
+.cron-preview {
+  background: #e3f2fd;
+  padding: 15px;
+  border-radius: 6px;
+  margin-top: 15px;
+  border-left: 4px solid #2196F3;
+}
+
+.cron-preview code {
+  background: #1976D2;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-left: 10px;
+}
+
 /* Page-specific styles */
 .containers-page,
 .execution-history-page,

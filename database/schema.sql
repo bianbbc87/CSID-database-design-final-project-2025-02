@@ -58,7 +58,6 @@ CREATE TABLE Jobs (
     owner_id CHAR(36),
     script_path VARCHAR(500),
     docker_image VARCHAR(200),
-    timeout_seconds INT DEFAULT 3600,
     is_active BOOLEAN DEFAULT TRUE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -98,7 +97,6 @@ CREATE TABLE JobRunLogs (
     log_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     run_id CHAR(36) NOT NULL,
     log_text LONGTEXT,
-    log_file_path VARCHAR(500),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (run_id) REFERENCES JobRuns(run_id) ON DELETE CASCADE
 );
@@ -152,7 +150,8 @@ INSERT INTO JobTypes (name, description) VALUES
 INSERT INTO RunTypes (name) VALUES 
 ('MANUAL'),
 ('SCHEDULED'),
-('RETRY');
+('RETRY'),
+('MONITORED');
 
 INSERT INTO EnvironmentTypes (name) VALUES 
 ('DOCKER'),

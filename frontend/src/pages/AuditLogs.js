@@ -17,10 +17,21 @@ function AuditLogs() {
     }
   };
 
-  const getContainerName = (afterValue) => {
+  const getContainerName = (log) => {
     try {
-      const parsed = typeof afterValue === 'string' ? JSON.parse(afterValue) : afterValue;
-      return parsed?.container_name || 'N/A';
+      // details에서 container_name 추출
+      if (log.details && log.details.container_name) {
+        return log.details.container_name;
+      }
+      
+      // after_value에서도 시도 (백업)
+      const afterValue = log.after_value;
+      if (afterValue) {
+        const parsed = typeof afterValue === 'string' ? JSON.parse(afterValue) : afterValue;
+        return parsed?.container_name || 'N/A';
+      }
+      
+      return 'N/A';
     } catch {
       return 'N/A';
     }
@@ -89,7 +100,7 @@ function AuditLogs() {
             {auditLogs.map(log => (
               <tr key={log.audit_id}>
                 <td>{new Date(log.created_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', hour12: false})}</td>
-                <td>{getContainerName(log.after_value)}</td>
+                <td>{getContainerName(log)}</td>
                 <td>{log.target_type}</td>
                 <td><code>{log.target_id}</code></td>
                 <td>{log.username || 'System'}</td>
@@ -112,19 +123,25 @@ function AuditLogs() {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Container Logs - {getContainerName(selectedLog.after_value)}</h3>
+              <h3>Container Logs - {getContainerName(selectedLog)}</h3>
               <button className="close-btn" onClick={closeModal}>✕</button>
             </div>
             <div className="modal-body">
               <pre className="log-text">
                 {(() => {
+                  // details에서 logs 추출
+                  if (selectedLog.details && selectedLog.details.logs) {
+                    return selectedLog.details.logs;
+                  }
+                  
+                  // after_value에서도 시도 (백업)
                   try {
                     const parsed = typeof selectedLog.after_value === 'string' 
                       ? JSON.parse(selectedLog.after_value) 
                       : selectedLog.after_value;
                     return parsed?.logs || 'No logs available';
                   } catch {
-                    return 'Error parsing logs';
+                    return 'No logs available';
                   }
                 })()}
               </pre>

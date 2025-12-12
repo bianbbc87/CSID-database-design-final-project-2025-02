@@ -127,8 +127,8 @@ def auto_register_job(job_data: AutoJobRegister, db: Session = Depends(get_db)):
             job_id = str(uuid.uuid4())
             db.execute(
                 text("""
-                    INSERT INTO Jobs (job_id, name, description, type_id, owner_id, script_path)
-                    VALUES (:job_id, :name, :description, :type_id, :owner_id, :script_path)
+                    INSERT INTO Jobs (job_id, name, description, type_id, owner_id, script_path, docker_image)
+                    VALUES (:job_id, :name, :description, :type_id, :owner_id, :script_path, :docker_image)
                 """),
                 {
                     "job_id": job_id,
@@ -136,7 +136,8 @@ def auto_register_job(job_data: AutoJobRegister, db: Session = Depends(get_db)):
                     "description": job_data.description,
                     "type_id": type_id,
                     "owner_id": user_id,
-                    "script_path": job_data.script_path
+                    "script_path": job_data.script_path,
+                    "docker_image": job_data.image
                 }
             )
         else:
@@ -170,13 +171,13 @@ def auto_register_job(job_data: AutoJobRegister, db: Session = Depends(get_db)):
         else:
             agent_id = agent_result[0]
         
-        # RunType 조회 (SCHEDULED for auto-detected containers)
+        # RunType 조회 (MONITORED for auto-detected containers)
         run_type_result = db.execute(
-            text("SELECT run_type_id FROM RunTypes WHERE name = 'SCHEDULED'")
+            text("SELECT run_type_id FROM RunTypes WHERE name = 'MONITORED'")
         ).fetchone()
         
         if not run_type_result:
-            raise HTTPException(status_code=500, detail="SCHEDULED run type not found")
+            raise HTTPException(status_code=500, detail="MONITORED run type not found")
         
         # JobRun 생성
         run_id = str(uuid.uuid4())
@@ -194,24 +195,6 @@ def auto_register_job(job_data: AutoJobRegister, db: Session = Depends(get_db)):
                 "run_type_id": run_type_result[0],
                 "user_id": user_id,
                 "started_at": datetime.fromisoformat(job_data.started_at.replace('Z', '+00:00'))
-            }
-        )
-        
-        # Audit 로그 생성
-        db.execute(
-            text("""
-                INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, after_value)
-                VALUES (:user_id, 'AUTO_JOB_START', 'job_run', :run_id, :after_value)
-            """),
-            {
-                "user_id": user_id,
-                "run_id": run_id,
-                "after_value": json.dumps({
-                    "job_name": job_data.name,
-                    "hostname": job_data.hostname,
-                    "container_id": job_data.container_id,
-                    "auto_detected": True
-                })
             }
         )
         
@@ -319,24 +302,25 @@ def get_containers(db: Session = Depends(get_db)):
                     # DB에 컨테이너 정보 업데이트/삽입
                     db.execute(
                         text("""
-                        INSERT INTO Jobs (job_id, name, description, type_id, owner_id, is_active, created_at)
+                        INSERT INTO Jobs (job_id, name, description, type_id, owner_id, docker_image, is_active, created_at)
                         SELECT UUID(), :name, :description, 
                                (SELECT type_id FROM JobTypes WHERE name = 'CONTAINER' LIMIT 1),
                                (SELECT user_id FROM Users WHERE username = 'system' LIMIT 1),
-                               :is_active, NOW()
+                               :docker_image, :is_active, NOW()
                         WHERE NOT EXISTS (SELECT 1 FROM Jobs WHERE name = :name)
                         """),
                         {
                             "name": name,
                             "description": f"Auto-detected container: {image}",
+                            "docker_image": image,
                             "is_active": is_active
                         }
                     )
                     
-                    # 기존 job의 상태 업데이트
+                    # 기존 job의 상태와 이미지 업데이트
                     db.execute(
-                        text("UPDATE Jobs SET is_active = :is_active WHERE name = :name"),
-                        {"is_active": is_active, "name": name}
+                        text("UPDATE Jobs SET is_active = :is_active, docker_image = :docker_image WHERE name = :name"),
+                        {"is_active": is_active, "docker_image": image, "name": name}
                     )
                     
                     containers[name] = {
@@ -373,7 +357,8 @@ def get_containers(db: Session = Depends(get_db)):
             "is_active": row[5],
             "created_at": row[6].isoformat() if row[6] else None,
             "container_status": containers.get(row[1], {}).get("status", "NOT_FOUND"),
-            "container_id": containers.get(row[1], {}).get("container_id", None)
+            "container_id": containers.get(row[1], {}).get("container_id", None),
+            "docker_image": containers.get(row[1], {}).get("image", "N/A")
         }
         for row in result
     ]
@@ -411,7 +396,7 @@ def get_jobs(db: Session = Depends(get_db)):
     result = db.execute(
         text("""
             SELECT j.job_id, j.name, j.description, jt.name as type_name,
-                   u.username, j.is_active, j.created_at
+                   u.username, j.is_active, j.created_at, j.docker_image
             FROM Jobs j
             JOIN JobTypes jt ON j.type_id = jt.type_id
             LEFT JOIN Users u ON j.owner_id = u.user_id
@@ -428,7 +413,8 @@ def get_jobs(db: Session = Depends(get_db)):
             "type_name": row[3],
             "owner_username": row[4] or "Unknown",
             "is_active": row[5],
-            "created_at": row[6].isoformat() if row[6] else None
+            "created_at": row[6].isoformat() if row[6] else None,
+            "docker_image": row[7]
         }
         for row in result
     ]
@@ -439,24 +425,46 @@ def start_container(job_id: str, db: Session = Depends(get_db)):
     try:
         import subprocess
         
-        # job_id로 컨테이너 이름 조회
+        # job_id로 컨테이너 정보 조회
         result = db.execute(
-            text("SELECT name FROM Jobs WHERE job_id = :job_id"),
+            text("SELECT name, docker_image FROM Jobs WHERE job_id = :job_id"),
             {"job_id": job_id}
         ).fetchone()
         
         if not result:
             return {"error": "Container not found", "success": False}
         
-        container_name = result[0]
+        container_name, docker_image = result
         
-        start_result = subprocess.run(
-            ["docker", "start", container_name], 
+        # 기존 컨테이너 상태 확인
+        inspect_result = subprocess.run(
+            ["docker", "inspect", container_name], 
             capture_output=True, text=True
         )
         
-        if start_result.returncode != 0:
-            return {"error": f"Failed to start: {start_result.stderr.strip()}", "success": False}
+        if inspect_result.returncode == 0:
+            # 컨테이너가 존재하는 경우 - 상태 확인
+            import json
+            container_info = json.loads(inspect_result.stdout)[0]
+            is_running = container_info['State']['Running']
+            
+            if is_running:
+                return {"message": f"Container {container_name} is already running", "success": True}
+            else:
+                # 종료된 컨테이너 - 제거 후 새로 실행
+                subprocess.run(["docker", "rm", container_name], capture_output=True)
+        
+        # 새 컨테이너 실행
+        if docker_image:
+            run_result = subprocess.run(
+                ["docker", "run", "--name", container_name, "-d", docker_image], 
+                capture_output=True, text=True
+            )
+        else:
+            return {"error": "No docker image specified for this job", "success": False}
+        
+        if run_result.returncode != 0:
+            return {"error": f"Failed to start: {run_result.stderr.strip()}", "success": False}
         
         # 기존 RUNNING 상태가 있다면 CANCELLED로 변경 (중복 방지)
         kst_now = datetime.now(KST)
@@ -530,6 +538,71 @@ def save_container_logs_to_audit(container_name: str, job_id: str, db: Session):
     except Exception as e:
         print(f"Failed to save container logs: {e}")
 
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str, db: Session = Depends(get_db)):
+    """Job 및 관련 데이터 완전 삭제"""
+    try:
+        # Job 존재 확인
+        job_result = db.execute(
+            text("SELECT name FROM Jobs WHERE job_id = :job_id"),
+            {"job_id": job_id}
+        ).fetchone()
+        
+        if not job_result:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job_name = job_result[0]
+        
+        # 1. JobRunErrors 삭제 (JobRuns 참조)
+        db.execute(
+            text("DELETE FROM JobRunErrors WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"),
+            {"job_id": job_id}
+        )
+        
+        # 2. JobRunLogs 삭제 (JobRuns 참조)
+        db.execute(
+            text("DELETE FROM JobRunLogs WHERE run_id IN (SELECT run_id FROM JobRuns WHERE job_id = :job_id)"),
+            {"job_id": job_id}
+        )
+        
+        # 3. JobRuns 삭제
+        db.execute(
+            text("DELETE FROM JobRuns WHERE job_id = :job_id"),
+            {"job_id": job_id}
+        )
+        
+        # 4. JobSchedules 삭제
+        db.execute(
+            text("DELETE FROM JobSchedules WHERE job_id = :job_id"),
+            {"job_id": job_id}
+        )
+        
+        # 5. 감사 로그 기록
+        db.execute(
+            text("""
+            INSERT INTO AuditLogs (user_id, action_type, target_type, target_id, before_value)
+            VALUES ((SELECT user_id FROM Users WHERE username = 'system' LIMIT 1), 
+                    'DELETE', 'job', :job_id, JSON_OBJECT('job_name', :job_name))
+            """),
+            {"job_id": job_id, "job_name": job_name}
+        )
+        
+        # 6. Jobs 삭제
+        result = db.execute(
+            text("DELETE FROM Jobs WHERE job_id = :job_id"),
+            {"job_id": job_id}
+        )
+        
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        db.commit()
+        return {"message": f"Job '{job_name}' and all related data deleted successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
 @app.post("/api/containers/{job_id}/stop")
 def stop_container(job_id: str, db: Session = Depends(get_db)):
     """컨테이너 정지"""
@@ -594,7 +667,7 @@ def get_job_run_logs(run_id: str, db: Session = Depends(get_db)):
     """특정 Job Run의 로그 조회"""
     result = db.execute(
         text("""
-        SELECT log_id, run_id, log_text, log_file_path, created_at
+        SELECT log_id, run_id, log_text, created_at
         FROM JobRunLogs 
         WHERE run_id = :run_id 
         ORDER BY created_at DESC
@@ -607,8 +680,7 @@ def get_job_run_logs(run_id: str, db: Session = Depends(get_db)):
             "log_id": row[0],
             "run_id": row[1], 
             "log_text": row[2],
-            "log_file_path": row[3],
-            "created_at": row[4].isoformat() if row[4] else None
+            "created_at": row[3].isoformat() if row[3] else None
         }
         for row in result
     ]

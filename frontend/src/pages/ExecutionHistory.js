@@ -178,7 +178,6 @@ function ExecutionHistory() {
               <th>Exit Code</th>
               <th>User</th>
               <th>Type</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -198,14 +197,6 @@ function ExecutionHistory() {
                   <span className={`run-type-badge ${(run.run_type || '').toLowerCase()}`}>
                     {run.run_type || 'UNKNOWN'}
                   </span>
-                </td>
-                <td>
-                  <button 
-                    className="logs-button"
-                    onClick={() => viewContainerLogs(run.run_id)}
-                  >
-                    📋 Logs
-                  </button>
                 </td>
               </tr>
             ))}

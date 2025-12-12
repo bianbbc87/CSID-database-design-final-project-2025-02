@@ -44,24 +44,6 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true  # 파일 변경 감지 개선
 
-  # 컨테이너 모니터링 서비스
-  container_monitor:
-    build: ./backend
-    container_name: job_container_monitor
-    depends_on:
-      - backend
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./job_tracker:/app/job_tracker
-    environment:
-      JOB_TRACKER_API_URL: http://backend:8000
-    command: >
-      sh -c "
-      pip install requests docker &&
-      export PYTHONPATH=/app:$PYTHONPATH &&
-      python -c 'import sys; sys.path.append(\"/app\"); from job_tracker import start_container_monitoring; monitor = start_container_monitoring(\"http://backend:8000\"); import time; [time.sleep(10) for _ in iter(int, 1)]'
-      "
-
   # 예시 Job 컨테이너들 (자동으로 감지됨)
   job-daily-etl:
     image: python:3.9
@@ -128,6 +110,42 @@ services:
       python existing_job_with_tracker.py cleanup
       "
     profiles: ["jobs"]
+
+  # 컨테이너 모니터링 서비스
+  container_monitor:
+    build: ./backend
+    container_name: job_container_monitor
+    depends_on:
+      - mysql
+      - backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend:/app
+    environment:
+      DATABASE_URL: mysql+pymysql://root:password@mysql/job_management
+    command: >
+      sh -c "
+      pip install requests pytz &&
+      python container_monitor.py
+      "
+
+  # Job 스케줄러 서비스
+  scheduler:
+    build: ./backend
+    container_name: job_scheduler
+    depends_on:
+      - mysql
+      - backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend:/app
+    environment:
+      DATABASE_URL: mysql+pymysql://root:password@mysql/job_management
+    command: >
+      sh -c "
+      pip install croniter &&
+      python scheduler.py
+      "
 
 volumes:
   mysql_data:

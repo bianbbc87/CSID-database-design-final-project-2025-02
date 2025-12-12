@@ -53,6 +53,28 @@ function Containers() {
     }
   };
 
+  const deleteJob = async (jobId, jobName) => {
+    if (!window.confirm(`Are you sure you want to delete job "${jobName}"? This will remove all related data permanently.`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      
+      if (response.ok) {
+        alert(result.message);
+        fetchContainers();
+      } else {
+        alert(`Error: ${result.detail}`);
+      }
+    } catch (error) {
+      alert(`Error: ${error.message}`);
+    }
+  };
+
   const viewLatestRun = async (jobId) => {
     try {
       const response = await fetch(`${API_BASE}/api/containers/${jobId}/latest-run`);
@@ -120,6 +142,7 @@ function Containers() {
             <h3>{container.name}</h3>
             <p><strong>Status:</strong> <span className={`status-badge ${container.container_status.toLowerCase()}`}>{container.container_status}</span></p>
             <p><strong>Type:</strong> {container.type_name}</p>
+            <p><strong>Image:</strong> <code>{container.docker_image || 'N/A'}</code></p>
             <p><strong>Owner:</strong> {container.username}</p>
             {container.description && <p><strong>Description:</strong> {container.description}</p>}
             <div className="job-actions">
@@ -128,7 +151,7 @@ function Containers() {
                   className="delete-btn"
                   onClick={() => stopContainer(container.job_id)}
                 >
-                  ⏹️ Stop Container
+                  Stop
                 </button>
               )}
               {(container.container_status === 'STOPPED' || container.container_status === 'CREATED') && (
@@ -136,14 +159,14 @@ function Containers() {
                   className="run-button"
                   onClick={() => startContainer(container.job_id)}
                 >
-                  ▶️ Start Container
+                  ▶ Start
                 </button>
               )}
               <button 
-                className="audit-button"
-                onClick={() => viewLatestRun(container.job_id)}
+                className="delete-btn"
+                onClick={() => deleteJob(container.job_id, container.name)}
               >
-                📋 Latest Run
+                Delete (Only References)
               </button>
             </div>
           </div>
