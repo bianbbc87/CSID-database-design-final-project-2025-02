@@ -19,14 +19,14 @@ echo "🔧 Starting Backend API..."
 source venv/bin/activate
 export DATABASE_URL="mysql+pymysql://root:password@localhost:3340/job_management"
 cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload &
 BACKEND_PID=$!
 cd ..
 
 # 프론트엔드 실행
 echo "🎨 Starting Frontend..."
 cd frontend
-REACT_APP_API_URL=http://localhost:8000 npm start &
+REACT_APP_API_URL=http://localhost:8001 npm start &
 FRONTEND_PID=$!
 cd ..
 
